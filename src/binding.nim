@@ -27,6 +27,79 @@ type
     name: string
     rule: string
 
+
+# =========
+# Constants
+# =========
+
+const 
+  TagOR = "tag-or"
+  TagAND = "tag-and"
+  DateOR = "date-or"
+  DateAND = "date-and"
+  FromOR = "from-or"
+  FromAND = "from-and"
+  ToOR = "to-or"
+  ToAND = "to-and"
+  CcOR = "cc-or"
+  CcAND = "cc-and"
+  SubjectOR = "subject-or"
+  SubjectAND = "subject-and"
+  
+  knownConditionalKeys = @[
+    TagOR,
+    TagAND,
+    DateOR,
+    DateAND,
+    FromOR,
+    FromAND,
+    ToOR,
+    ToAND,
+    CcOR,
+    CcAND,
+    SubjectOR,
+    SubjectAND 
+  ]
+
+
+# =========
+# Templates
+# =========
+
+template checkStatus(status: notmuch_status_t) =
+  case status
+  of NOTMUCH_STATUS_SUCCESS:
+    discard
+  else:
+    echo("Error: " & $status.to_string())
+    quit(QuitFailure)
+
+template convertConditionalKey(key: string): string =
+  case key:
+  of TagOR, TagAND:
+    "tag"
+  of DateOR, DateAND:
+    "date"
+  of FromOR, FromAND:
+    "from"
+  of ToOR, ToAND:
+    "to"
+  of CcOR, CcAND:
+    "cc"
+  of SubjectOR, SubjectAND:
+    "subject"
+  else:
+    ""
+
+template convertConditionalOperator(key: string): string =
+  case key:
+  of TagOR, DateOR, FromOR, ToOR, CcOR, SubjectOR:
+    " or "
+  of TagAND, DateAND, FromAND, ToAND, CcAND, SubjectAND:
+    " and "
+  else:
+    ""
+
 # =========
 # Functions
 # =========
@@ -41,14 +114,6 @@ proc usage(): void =
 proc versionInfo(): void =
   echo(progname() & " v0.1")
   quit(QuitSuccess)
-
-template checkStatus(status: notmuch_status_t) =
-  case status
-  of NOTMUCH_STATUS_SUCCESS:
-    discard
-  else:
-    echo("Error: " & $status.to_string())
-    quit(QuitFailure)
 
 proc composeFilterName(parent: string, child: string): string = 
   var composed_name = ""
@@ -69,6 +134,16 @@ proc collectRules(filter: TomlTableRef, name: string): seq[TaggingRule] =
       let subfilter = value.tableVal
       let children = subfilter.collectRules(filter_name)
       rules = rules.concat(children)
+    of TomlValueKind.Array:
+      var conditions = newSeq[string]()
+      for item in value.arrayVal:
+        if item.kind == TomlValueKind.String:
+          let rule_string = convertConditionalKey(key) & ":" & item.stringVal
+          conditions.add(rule_string)
+      if len(conditions) > 0 and knownConditionalKeys.contains(key):
+        let rule_string = conditions.join(convertConditionalOperator(key))
+        let new_rule = TaggingRule(name: name, rule: rule_string)
+        rules.add(new_rule)
     of TomlValueKind.String:
       let rule_string = value.stringVal.strip()
       if len(rule_string) > 0 and key == "rule":
@@ -147,15 +222,43 @@ var database: notmuch_database_t
 let open_status = open(notmuch_database_path, NOTMUCH_DATABASE_MODE_READ_WRITE, addr database)
 checkStatus(open_status)
 
+var initial_query = ""
 case selection
 of All:
-  discard
+  initial_query = "*"
 of New:
-  discard
+  initial_query = "tag:new"
 else:
   discard
 
+let query: notmuch_query_t = database.create(initial_query)
+var messages: notmuch_messages_t
+let query_status = query.search_messages_st(addr messages)
+checkStatus(query_status)
 
+var message_counter = 0
+for message in messages.items():
+
+  let sender = message.get_header("From")
+  let subject = message.get_header("Subject")
+  let recipient = message.get_header("To")
+  let copied = message.get_header("Cc")
+  let recieved = message.get_date()
+  let tags = message.get_tags()
+
+  for tag_name in tags.items():
+    case $tag_name
+    of "new":
+      let remove_new_tag_status = message.remove_tag(tag_name)
+      checkStatus(remove_new_tag_status)
+    else:
+      discard
+
+  message_counter += 1
+
+echo($message_counter)
+
+query.destroy()
 
 let close_status = database.close()
 checkStatus(close_status)
