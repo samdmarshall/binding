@@ -13,4 +13,4 @@ bin = @["binding"]
 requires "nim >= 0.16.0"
 requires "parsetoml >= 0.2"
 requires "notmuch >= 0.1.0"
-
+requires "progress >= 0.1.0"

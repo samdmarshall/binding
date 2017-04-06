@@ -10,7 +10,8 @@ import strutils
 import parseopt2
 
 import notmuch
-import parsetoml 
+import progress
+import parsetoml
 
 # =====
 # Types
@@ -108,7 +109,7 @@ proc progName(): string =
   result = getAppFilename().extractFilename()
 
 proc usage(): void =
-  echo("usage: " & progName() & " [-v|--version] [-h|--help] [--config:path]")
+  echo("usage: " & progName() & " [-v|--version] [-h|--help] [--new|--all] (--config:path) (--is-tty)")
   quit(QuitSuccess)
 
 proc versionInfo(): void =
@@ -166,6 +167,7 @@ proc collectRules(filter: TomlTableRef, name: string): seq[TaggingRule] =
 # Entry Point
 # ===========
 
+var enable_tty = false
 var selection: TagSelection = None
 var configuration_path: string
 if existsEnv("BINDING_CONFIG"):
@@ -187,6 +189,8 @@ for kind, key, value in getopt():
       selection = All
     of "new":
       selection = New
+    of "is-tty":
+      enable_tty = true
     else:
       discard
   else:
@@ -232,16 +236,33 @@ else:
   discard
 
 let query: notmuch_query_t = database.create(initial_query)
+
+var message_count: cuint
+let count_messages_status = query.count_messages_st(addr message_count)
+checkStatus(count_messages_status)
+
+if message_count == 0:
+  # there are no messages to process, so we can quit early :)
+  quit(QuitSuccess)
+
+var bar: ProgressBar
+# start the progress bar if it is a tty
+if enable_tty:
+  let signed_message_count = int64(message_count)
+  let signed_int_message_count = int(signed_message_count)
+  bar = newProgressBar(signed_int_message_count)
+  bar.start()
+
 var messages: notmuch_messages_t
 let query_status = query.search_messages_st(addr messages)
 checkStatus(query_status)
 
-var message_counter = 0
 for message in messages.items():
-
+  var did_filter_from_inbox = false
   let identifier = message.get_message_id()
 
   for filter in rules:
+    # TODO: replace this with a faster search implementation, this is eating a lot of processing time
     var matched_messages: notmuch_messages_t
     let check_rule_query_string = "id:" & $identifier & " and " & filter.rule
     let check_rule_query = database.create(check_rule_query_string)
@@ -250,6 +271,7 @@ for message in messages.items():
     for matched_message in matched_messages.items():
       let add_tag_status = matched_message.add_tag(filter.name)
       checkStatus(add_tag_status)
+      did_filter_from_inbox = true
       
   let tags = message.get_tags()
   for tag_name in tags.items():
@@ -259,10 +281,18 @@ for message in messages.items():
       checkStatus(remove_new_tag_status)
     else:
       discard
+    if did_filter_from_inbox:
+      let remove_inbox_tag_status = message.remove_tag("inbox")
+      checkStatus(remove_inbox_tag_status)
 
-  message_counter += 1
+  if enable_tty:
+    bar.increment()
 
 query.destroy()
+
+if enable_tty:
+  bar.finish()
+  echo("\n")
 
 let close_status = database.close()
 checkStatus(close_status)
