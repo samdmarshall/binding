@@ -239,13 +239,19 @@ checkStatus(query_status)
 var message_counter = 0
 for message in messages.items():
 
-  let sender = message.get_header("From")
-  let subject = message.get_header("Subject")
-  let recipient = message.get_header("To")
-  let copied = message.get_header("Cc")
-  let recieved = message.get_date()
-  let tags = message.get_tags()
+  let identifier = message.get_message_id()
 
+  for filter in rules:
+    var matched_messages: notmuch_messages_t
+    let check_rule_query_string = "id:" & $identifier & " and " & filter.rule
+    let check_rule_query = database.create(check_rule_query_string)
+    let check_rule_query_status = check_rule_query.search_messages_st(addr matched_messages)
+    checkStatus(check_rule_query_status)
+    for matched_message in matched_messages.items():
+      let add_tag_status = matched_message.add_tag(filter.name)
+      checkStatus(add_tag_status)
+      
+  let tags = message.get_tags()
   for tag_name in tags.items():
     case $tag_name
     of "new":
@@ -255,8 +261,6 @@ for message in messages.items():
       discard
 
   message_counter += 1
-
-echo($message_counter)
 
 query.destroy()
 
