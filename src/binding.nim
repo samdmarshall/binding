@@ -105,10 +105,10 @@ template convertConditionalOperator(key: string): string =
 # =========
 
 proc progName(): string =
-  result = getAppFilename().extractFilename()
+  return getAppFilename().extractFilename()
 
 proc usage(): void =
-  echo("usage: " & progName() & " [-v|--version] [-h|--help] [--new|--all] (--config:path)")
+  echo("usage: " & progName() & " [-v|--version] [-h|--help] [--new|--all]")
   quit(QuitSuccess)
 
 proc versionInfo(): void =
@@ -167,11 +167,8 @@ proc collectRules(filter: TomlTableRef, name: string): seq[TaggingRule] =
 # ===========
 
 var selection: TagSelection = None
-var configuration_path: string
-if existsEnv("BINDING_CONFIG"):
-  configuration_path = getEnv("BINDING_CONFIG").expandTilde()
-else:
-  configuration_path = expandTilde("~/.config/binding/config.toml")
+let configuration_path = "~/.config/binding/config.toml".expandTilde().expandFilename()
+let rules_path = "~/.config/binding/rules.toml".expandTilde().expandFilename()
 
 for kind, key, value in getopt():
   case kind
@@ -181,8 +178,6 @@ for kind, key, value in getopt():
       usage()
     of "version", "v":
       versionInfo()
-    of "config":
-      configuration_path = expandTilde(value)
     of "all":
       selection = All
     of "new":
@@ -193,28 +188,19 @@ for kind, key, value in getopt():
     discard
 
 if not configuration_path.fileExists():
-  echo("unable to find a configuration file at '" & configuration_path & "'! Please;")
-  echo("  1. create it")
-  echo("  -- or --")
-  echo("  2. specify the path to the configuration file using:")
-  echo("    * the command line flag `--config:path`")
-  echo("    -- or --")
-  echo("    * the environment variable `BINDING_CONFIG`")
+  echo("unable to find a configuration file at '" & configuration_path & "'!")
   quit(QuitFailure)
 
 if selection == None:
   echo("No filter selection specified, please pass either `--all` or `--new`!")
   quit(QuitFailure)
 
-if not existsEnv("NOTMUCH_CONFIG"):
-  echo("Unable to locate the notmuch configuration file, please define `NOTMUCH_CONFIG` in your environment")
-  quit(QuitFailure)
-
-let configuration_full_path = configuration_path.expandFilename()
-let filter = parseFile(configuration_full_path).tableVal
+let filter = parseFile(rules_path).tableVal
 let rules = filter.collectRules("")
 
-let notmuch_config_path = expandTilde(getEnv("NOTMUCH_CONFIG")).expandFilename()
+let configuration = parseFile(configuration_path).tableVal
+let notmuch_config_path_value = configuration["notmuch"]["config"].stringVal
+let notmuch_config_path = notmuch_config_path_value.expandTilde().expandFilename()
 let notmuch_config = loadConfig(notmuch_config_path)
 let notmuch_database_path = notmuch_config.getSectionValue("database", "path")
 
@@ -222,12 +208,14 @@ var database: notmuch_database_t
 let open_status = open(notmuch_database_path, NOTMUCH_DATABASE_MODE_READ_WRITE, addr database)
 checkStatus(open_status)
 
+let initial_tag = configuration["notmuch"]["initial_tag"].stringVal
+
 var initial_query = ""
 case selection
 of All:
   initial_query = "*"
 of New:
-  initial_query = "tag:unread"
+  initial_query = "tag:" & initial_tag
 else:
   discard
 
@@ -249,7 +237,7 @@ var messages_with_rules = newSeq[cstring]()
 for filter in rules:
   var matched_messages: notmuch_messages_t
   let check_rule_query_string = if selection == New:
-                                  filter.rule & " and tag:unread"
+                                  filter.rule & " and " & initial_query
                                 else:
                                   filter.rule
   let check_rule_query = database.create(check_rule_query_string)
