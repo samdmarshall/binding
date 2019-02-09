@@ -11,5 +11,5 @@ bin = @["binding"]
 # Dependencies
 
 requires "nim >= 0.16.0"
-requires "parsetoml 0.3.2"
+requires "parsetoml >= 0.3.2"
 requires "notmuch >= 0.1.0"

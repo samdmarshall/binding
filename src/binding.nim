@@ -3,6 +3,7 @@
 # =======
 
 import os
+import times
 import tables
 import parsecfg
 import sequtils
@@ -210,52 +211,61 @@ checkStatus(open_status)
 
 let initial_tag = configuration["notmuch"]["initial_tag"].stringVal
 
-var initial_query = ""
 case selection
 of All:
-  initial_query = "*"
+  for filter in rules:
+    let query_based_on_rule_text = database.create(filter.rule)
+
+    var messages_matching_rule: notmuch_messages_t
+    let messages_matching_rule_status = query_based_on_rule_text.search_messages_st(addr messages_matching_rule)
+    checkStatus(messages_matching_rule_status)
+    for message in messages_matching_rule.items():
+      let tag_added_status = message.add_tag(filter.name)
+      checkStatus(tag_added_status)
+
 of New:
-  initial_query = "tag:" & initial_tag
+  let initial_query = "tag:" & initial_tag
+  let query: notmuch_query_t = database.create(initial_query)
+
+  var message_count: cuint
+  let count_messages_status = query.count_messages_st(addr message_count)
+  checkStatus(count_messages_status)
+  if message_count == 0:
+    # there are no messages to process, so we can quit early :)
+    quit(QuitSuccess)
+
+  var messages: notmuch_messages_t
+  let query_status = query.search_messages_st(addr messages)
+  checkStatus(query_status)
+
+  var applied_rule_to_message: bool
+  for message in messages.items():
+    applied_rule_to_message = false
+    let identifier = message.get_message_id()
+    for filter in rules:
+      var message_matched_rule_count: cuint = 0
+      let check_rule_query_string = filter.rule & " and " & "(" & initial_query & ")"
+      let matched_message_query_string = "id:" & $identifier & " and " & "(" & check_rule_query_string & ")"
+      let check_rule_query = database.create(matched_message_query_string)
+      let check_rule_query_status = check_rule_query.count_messages_st(addr message_matched_rule_count)
+      checkStatus(check_rule_query_status)
+
+      case message_matched_rule_count:
+        of 0:
+          continue
+        of 1:
+          let tagged_message_status = message.add_tag(filter.name)
+          checkStatus(tagged_message_status)
+          applied_rule_to_message = true
+        else:
+          echo "Found more than one message with the same identifier, aborting!!"
+          quit(QuitFailure)
+    if applied_rule_to_message == true:
+      let remove_tag_status = message.remove_tag("inbox")
+      checkStatus(remove_tag_status)
+  query.destroy()
 else:
   discard
-
-let query: notmuch_query_t = database.create(initial_query)
-
-var message_count: cuint
-let count_messages_status = query.count_messages_st(addr message_count)
-checkStatus(count_messages_status)
-
-if message_count == 0:
-  # there are no messages to process, so we can quit early :)
-  quit(QuitSuccess)
-
-var messages: notmuch_messages_t
-let query_status = query.search_messages_st(addr messages)
-checkStatus(query_status)
-
-var messages_with_rules = newSeq[cstring]()
-for filter in rules:
-  var matched_messages: notmuch_messages_t
-  let check_rule_query_string = if selection == New:
-                                  filter.rule & " and " & initial_query
-                                else:
-                                  filter.rule
-  let check_rule_query = database.create(check_rule_query_string)
-  let check_rule_query_status = check_rule_query.search_messages_st(addr matched_messages)
-  checkStatus(check_rule_query_status)
-  for matched_message in matched_messages.items():
-    let add_tag_status = matched_message.add_tag(filter.name)
-    checkStatus(add_tag_status)
-    let identifier = matched_message.get_message_id()
-    messages_with_rules.add(identifier)
-
-for message in messages:
-  let identifier = message.get_message_id()
-  if messages_with_rules.contains(identifier):
-    let remove_tag_status = message.remove_tag("inbox")
-    checkStatus(remove_tag_status)
-
-query.destroy()
 
 let close_status = database.close()
 checkStatus(close_status)
