@@ -6,12 +6,18 @@ import os
 import times
 import tables
 import parsecfg
+import parseopt
 import sequtils
 import strutils
-import parseopt2
 
 import notmuch
 import parsetoml
+
+# ======
+# Static
+# ======
+
+const configuration_path = getConfigDir() / "binding" / "config.toml"
 
 # =====
 # Types
@@ -113,8 +119,22 @@ proc usage(): void =
   quit(QuitSuccess)
 
 proc versionInfo(): void =
-  echo(progname() & " v0.1")
+  echo(progname() & " v0.2.0")
   quit(QuitSuccess)
+
+proc parsePathFromConfigValue(path: string): string =
+  var finalized_path = ""
+
+  var path_value_tilde_expand = path.expandTilde()
+  var path_value_normalized = path_value_tilde_expand.normalizedPath()
+  let (dir, file) = path_value_normalized.splitPath()
+  if len(dir) == 0:
+    let config_dir = parentDir(configuration_path)
+    finalized_path = config_dir / file
+  else:
+    finalized_path = path_value_normalized.expandFilename()
+  
+  return finalized_path
 
 proc composeFilterName(parent: string, child: string): string = 
   var composed_name = ""
@@ -168,10 +188,10 @@ proc collectRules(filter: TomlTableRef, name: string): seq[TaggingRule] =
 # ===========
 
 var selection: TagSelection = None
-let configuration_path = "~/.config/binding/config.toml".expandTilde().expandFilename()
-let rules_path = "~/.config/binding/rules.toml".expandTilde().expandFilename()
 
-for kind, key, value in getopt():
+var parser = initOptParser()
+
+for kind, key, value in parser.getopt():
   case kind
   of cmdLongOption, cmdShortOption:
     case key
@@ -196,12 +216,9 @@ if selection == None:
   echo("No filter selection specified, please pass either `--all` or `--new`!")
   quit(QuitFailure)
 
-let filter = parseFile(rules_path).tableVal
-let rules = filter.collectRules("")
-
 let configuration = parseFile(configuration_path).tableVal
 let notmuch_config_path_value = configuration["notmuch"]["config"].stringVal
-let notmuch_config_path = notmuch_config_path_value.expandTilde().expandFilename()
+let notmuch_config_path = parsePathFromConfigValue(notmuch_config_path_value)
 let notmuch_config = loadConfig(notmuch_config_path)
 let notmuch_database_path = notmuch_config.getSectionValue("database", "path")
 
@@ -209,7 +226,17 @@ var database: notmuch_database_t
 let open_status = open(notmuch_database_path, NOTMUCH_DATABASE_MODE_READ_WRITE, addr database)
 checkStatus(open_status)
 
-let initial_tag = configuration["notmuch"]["initial_tag"].stringVal
+let new_mail_tags = notmuch_config.getSectionValue("new", "tags").split(';')
+if len(new_mail_tags) == 0:
+  echo("In order for 'binding' to work, your notmuch config must specify at least one tag to be applied to 'new' mail.")
+  quit(QuitFailure)
+
+let initial_tag = new_mail_tags[1]
+
+let rules_path_value = configuration["binding"]["rules"].stringVal
+let rules_path = parsePathFromConfigValue(rules_path_value)
+let filter = parseFile(rules_path).tableVal
+let rules = filter.collectRules("")
 
 case selection
 of All:
