@@ -3,7 +3,6 @@
 # =======
 
 import os
-import times
 import tables
 import parsecfg
 import parseopt
