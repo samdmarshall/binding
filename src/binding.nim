@@ -216,6 +216,13 @@ if selection == None:
   quit(QuitFailure)
 
 let configuration = parseFile(configuration_path).tableVal
+
+if not configuration.hasKey("notmuch"): 
+  let notmuch_key_value = configuration["notmuch"].tableVal
+  if not notmuch_key_value.hasKey("config"):
+    echo "binding's configuration file must specify an entry for the notmuch config!"
+    quit(QuitFailure)
+
 let notmuch_config_path_value = configuration["notmuch"]["config"].stringVal
 let notmuch_config_path = parsePathFromConfigValue(notmuch_config_path_value)
 let notmuch_config = loadConfig(notmuch_config_path)
@@ -231,6 +238,12 @@ if len(new_mail_tags) == 0:
   quit(QuitFailure)
 
 let initial_tag = new_mail_tags[1]
+
+if not configuration.hasKey("binding"):
+  let binding_key_value = configuration["binding"].tableVal
+  if not binding_key_value.hasKey("rules"):
+    echo "binding's configuration file must specify an entry to the rules file!"
+    quit(QuitFailure)
 
 let rules_path_value = configuration["binding"]["rules"].stringVal
 let rules_path = parsePathFromConfigValue(rules_path_value)
