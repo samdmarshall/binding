@@ -255,6 +255,14 @@ let rules_path = parsePathFromConfigValue(rules_path_value)
 let filter = parseFile(rules_path).tableVal
 let rules = filter.collectRules("")
 
+let mark_tags_value = configuration["binding"]["mark"].tableVal
+var mark_tags = newTable[string, seq[string]]()
+for mark_tag, match_tags in pairs(mark_tags_value):
+  var match_tag_seq = newSeq[string]()
+  for entry in match_tags.arrayVal:
+    match_tag_seq.add(entry.stringVal)
+  mark_tags[mark_tag] = match_tag_seq
+
 case selection
 of All:
   for filter in rules:
@@ -263,9 +271,14 @@ of All:
     var messages_matching_rule: notmuch_messages_t
     let messages_matching_rule_status = query_based_on_rule_text.search_messages_st(addr messages_matching_rule)
     checkStatus(messages_matching_rule_status)
+
     for message in messages_matching_rule.items():
       let tag_added_status = message.add_tag(filter.name)
       checkStatus(tag_added_status)
+      for mark, match_rules in pairs(mark_tags):
+        if match_rules.contains(filter.name):
+          let remove_marked_tag_status = message.remove_tag(mark)
+          checkStatus(remove_marked_tag_status)
 
 of New:
   let initial_query = "tag:" & initial_tag
@@ -302,8 +315,10 @@ of New:
           let tagged_message_status = message.add_tag(filter.name)
           checkStatus(tagged_message_status)
 
-          let remove_tag_status = message.remove_tag("inbox")
-          checkStatus(remove_tag_status)
+          for mark, match_rules in pairs(mark_tags):
+            if match_rules.contains(filter.name):
+              let remove_marked_tag_status = message.remove_tag(mark)
+              checkStatus(remove_marked_tag_status)
         else:
           echo(
               "Found more than one message with the same identifier, aborting!!")
