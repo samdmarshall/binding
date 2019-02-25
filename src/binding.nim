@@ -27,7 +27,8 @@ type
   TagSelection = enum
     None,
     All,
-    New
+    New,
+    Debug
 
 type
   TaggingRule = object
@@ -148,6 +149,7 @@ proc collectRules(filter: TomlTableRef, name: string): seq[TaggingRule] =
   var child_filters = newSeq[string]()
   for key, value in filter.pairs():
     let filter_name = composeFilterName(name, key)
+    debug("creating rule '" & filter_name & "'...") 
     case value.kind
     of TomlValueKind.Table:
       if len(name) > 0:
@@ -156,6 +158,7 @@ proc collectRules(filter: TomlTableRef, name: string): seq[TaggingRule] =
       let children = subfilter.collectRules(filter_name)
       rules = rules.concat(children)
     of TomlValueKind.Array:
+      debug("  array value:")
       var conditions = newSeq[string]()
       for item in value.arrayVal:
         if item.kind == TomlValueKind.String:
@@ -164,11 +167,14 @@ proc collectRules(filter: TomlTableRef, name: string): seq[TaggingRule] =
       if len(conditions) > 0 and knownConditionalKeys.contains(key):
         let rule_string = conditions.join(convertConditionalOperator(key))
         let new_rule = TaggingRule(name: name, rule: rule_string)
+        debug("    built rule: " & rule_string)
         rules.add(new_rule)
     of TomlValueKind.String:
+      debug("  string value:")
       let rule_string = value.stringVal.strip()
       if len(rule_string) > 0 and key == "rule":
         let new_rule = TaggingRule(name: name, rule: value.stringVal)
+        debug("    built rule: " & $value.stringVal)
         rules.add(new_rule)
     else:
       discard
@@ -187,7 +193,7 @@ proc collectRules(filter: TomlTableRef, name: string): seq[TaggingRule] =
 # Entry Point
 # ===========
 
-var logger: ConsoleLogger
+var logger: ConsoleLogger = newConsoleLogger(lvlError)
 
 var selection: TagSelection = None
 
@@ -207,29 +213,32 @@ for kind, key, value in parser.getopt():
       selection = New
     of "verbose":
       logger = newConsoleLogger(lvlAll)
-      addHandler(logger)
+    of "debug":
+      selection = Debug
     else:
       discard
   else:
     discard
 
+addHandler(logger)
+
 if not configuration_path.fileExists():
-  echo("unable to find a configuration file at '" & configuration_path & "'!")
+  fatal("unable to find a configuration file at '" & configuration_path & "'!")
   quit(QuitFailure)
 
 if selection == None:
-  echo("No filter selection specified, please pass either `--all` or `--new`!")
+  fatal("No filter selection specified, please pass either `--all` or `--new`!")
   quit(QuitFailure)
 
 let configuration = parseFile(configuration_path).tableVal
 
 if not configuration.hasKey("notmuch"):
-  echo("binding's configuration file must specify an section for the details about your notmuch setup!")
+  error("binding's configuration file must specify an section for the details about your notmuch setup!")
   quit(QuitFailure)
 
 let notmuch_key_value = configuration["notmuch"].tableVal
 if not notmuch_key_value.hasKey("config"):
-  echo("binding's configuration file must specify an entry for the notmuch config!")
+  error("binding's configuration file must specify an entry for the notmuch config!")
   quit(QuitFailure)
 
 let notmuch_config_path_value = configuration["notmuch"]["config"].stringVal
@@ -259,13 +268,13 @@ else:
     new_mail_tags.add(tag.stringVal)
 
 if len(new_mail_tags) == 0:
-  echo("In order for 'binding' to work, your notmuch config must specify at least one tag to be applied to 'new' mail; or set overrides to this value in 'binding's config.toml under the section [notmuch.new] using the key 'tags' (takes an array of strings)")
+  error("In order for 'binding' to work, your notmuch config must specify at least one tag to be applied to 'new' mail; or set overrides to this value in 'binding's config.toml under the section [notmuch.new] using the key 'tags' (takes an array of strings)")
   quit(QuitFailure)
 
 if not configuration.hasKey("binding"):
   let binding_key_value = configuration["binding"].tableVal
   if not binding_key_value.hasKey("rules"):
-    echo("binding's configuration file must specify an entry to the rules file!")
+    error("binding's configuration file must specify an entry to the rules file!")
     quit(QuitFailure)
 
 let rules_path_value = configuration["binding"]["rules"].stringVal
@@ -281,7 +290,9 @@ for mark_tag, match_tags in pairs(mark_tags_value):
     match_tag_seq.add(entry.stringVal)
   mark_tags[mark_tag] = match_tag_seq
 
-
+for item in rules:
+  info(item.name & " => " & item.rule)
+ 
 case selection
 of All:
   debug("Applying rules against all mail...")
@@ -339,13 +350,24 @@ of New:
           let tagged_message_status = message.add_tag(filter.name)
           checkStatus(tagged_message_status)
 
+          let split_name = filter.name.split(".")
+          var pos = split_name.high()
+          dec(pos)
+          let low = split_name.low()
+          while pos >= low:
+            let parent_rule_name = split_name[low..pos].join(".")
+            debug("  matched to parent rule: " & parent_rule_name & "!")
+            let parent_rule_tagged_message_status = message.add_tag(parent_rule_name)
+            checkStatus(parent_rule_tagged_message_status)
+            dec(pos)
+
           for mark, match_rules in pairs(mark_tags):
             if match_rules.contains(filter.name):
               debug("  removing tag name: " & mark & "!")
               let remove_marked_tag_status = message.remove_tag(mark)
               checkStatus(remove_marked_tag_status)
         else:
-          echo("Found more than one message with the same identifier, aborting!!")
+          fatal("Found more than one message with the same identifier, aborting!!")
           quit(QuitFailure)
   query.destroy()
 else:
