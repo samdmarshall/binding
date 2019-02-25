@@ -4,6 +4,7 @@
 
 import os
 import tables
+import logging
 import parsecfg
 import parseopt
 import sequtils
@@ -186,6 +187,8 @@ proc collectRules(filter: TomlTableRef, name: string): seq[TaggingRule] =
 # Entry Point
 # ===========
 
+var logger: ConsoleLogger
+
 var selection: TagSelection = None
 
 var parser = initOptParser()
@@ -202,6 +205,9 @@ for kind, key, value in parser.getopt():
       selection = All
     of "new":
       selection = New
+    of "verbose":
+      logger = newConsoleLogger(lvlAll)
+      addHandler(logger)
     else:
       discard
   else:
@@ -212,42 +218,54 @@ if not configuration_path.fileExists():
   quit(QuitFailure)
 
 if selection == None:
-  echo(
-      "No filter selection specified, please pass either `--all` or `--new`!")
+  echo("No filter selection specified, please pass either `--all` or `--new`!")
   quit(QuitFailure)
 
 let configuration = parseFile(configuration_path).tableVal
 
 if not configuration.hasKey("notmuch"):
-  let notmuch_key_value = configuration["notmuch"].tableVal
-  if not notmuch_key_value.hasKey("config"):
-    echo(
-        "binding's configuration file must specify an entry for the notmuch config!")
-    quit(QuitFailure)
+  echo("binding's configuration file must specify an section for the details about your notmuch setup!")
+  quit(QuitFailure)
+
+let notmuch_key_value = configuration["notmuch"].tableVal
+if not notmuch_key_value.hasKey("config"):
+  echo("binding's configuration file must specify an entry for the notmuch config!")
+  quit(QuitFailure)
 
 let notmuch_config_path_value = configuration["notmuch"]["config"].stringVal
 let notmuch_config_path = parsePathFromConfigValue(notmuch_config_path_value)
 let notmuch_config = loadConfig(notmuch_config_path)
-let notmuch_database_path = notmuch_config.getSectionValue("database", "path")
+
+let notmuch_configuration_overrides = configuration["notmuch"].tableVal
 
 var database: notmuch_database_t
-let open_status = open(notmuch_database_path,
-    NOTMUCH_DATABASE_MODE_READ_WRITE, addr database)
+var notmuch_database_path: string
+
+if not notmuch_configuration_overrides.hasKey("database"):
+  notmuch_database_path = notmuch_config.getSectionValue("database", "path")
+else:
+  notmuch_database_path = notmuch_configuration_overrides["database"]["path"].stringVal
+
+let open_status = open(notmuch_database_path, NOTMUCH_DATABASE_MODE_READ_WRITE, addr database)
 checkStatus(open_status)
 
-let new_mail_tags = notmuch_config.getSectionValue("new", "tags").split(';')
-if len(new_mail_tags) == 0:
-  echo(
-      "In order for 'binding' to work, your notmuch config must specify at least one tag to be applied to 'new' mail.")
-  quit(QuitFailure)
+var new_mail_tags: seq[string]
 
-let initial_tag = new_mail_tags[0]
+if not notmuch_configuration_overrides.hasKey("new"):
+  new_mail_tags = notmuch_config.getSectionValue("new", "tags").split(';')
+else:
+  let raw_tags = notmuch_configuration_overrides["new"]["tags"].arrayVal
+  for tag in raw_tags:
+    new_mail_tags.add(tag.stringVal)
+
+if len(new_mail_tags) == 0:
+  echo("In order for 'binding' to work, your notmuch config must specify at least one tag to be applied to 'new' mail; or set overrides to this value in 'binding's config.toml under the section [notmuch.new] using the key 'tags' (takes an array of strings)")
+  quit(QuitFailure)
 
 if not configuration.hasKey("binding"):
   let binding_key_value = configuration["binding"].tableVal
   if not binding_key_value.hasKey("rules"):
-    echo(
-        "binding's configuration file must specify an entry to the rules file!")
+    echo("binding's configuration file must specify an entry to the rules file!")
     quit(QuitFailure)
 
 let rules_path_value = configuration["binding"]["rules"].stringVal
@@ -263,32 +281,39 @@ for mark_tag, match_tags in pairs(mark_tags_value):
     match_tag_seq.add(entry.stringVal)
   mark_tags[mark_tag] = match_tag_seq
 
+
 case selection
 of All:
+  debug("Applying rules against all mail...")
   for filter in rules:
+    debug("finding mail matching rule: " & filter.name)
     let query_based_on_rule_text = database.create(filter.rule)
-
     var messages_matching_rule: notmuch_messages_t
     let messages_matching_rule_status = query_based_on_rule_text.search_messages_st(addr messages_matching_rule)
     checkStatus(messages_matching_rule_status)
 
     for message in messages_matching_rule.items():
+      let identifier = message.get_message_id()
+      debug("  matched mail record: " & $identifier)
       let tag_added_status = message.add_tag(filter.name)
       checkStatus(tag_added_status)
       for mark, match_rules in pairs(mark_tags):
         if match_rules.contains(filter.name):
           let remove_marked_tag_status = message.remove_tag(mark)
           checkStatus(remove_marked_tag_status)
-
 of New:
-  let initial_query = "tag:" & initial_tag
-  let query: notmuch_query_t = database.create("date:today")
+  debug("Applying rules against 'new' mail...")
+  new_mail_tags.applyIt("tag:" & it)
+  let initial_query = new_mail_tags.join(" or ")
+  debug("Finding mail matching: '" & initial_query & "'...")
+  let query: notmuch_query_t = database.create(initial_query)
 
   var message_count: cuint
   let count_messages_status = query.count_messages_st(addr message_count)
   checkStatus(count_messages_status)
+  debug("Found " & $message_count & " messages matching rule...")
   if message_count == 0:
-    # there are no messages to process, so we can quit early :)
+    debug("There are no messages to process, so we can quit early :)")
     quit(QuitSuccess)
 
   var messages: notmuch_messages_t
@@ -297,31 +322,30 @@ of New:
 
   for message in messages.items():
     let identifier = message.get_message_id()
+    debug("filtering message with id: " & $identifier & " ...")
     for filter in rules:
       var message_matched_rule_count: cuint = 0
-      let check_rule_query_string = filter.rule & " and " & "(" &
-          initial_query & ")"
-      let matched_message_query_string = "id:" & $identifier & " and " & "(" &
-          check_rule_query_string & ")"
+      let check_rule_query_string = filter.rule & " and " & "(" & initial_query & ")"
+      let matched_message_query_string = "id:" & $identifier & " and " & "(" & check_rule_query_string & ")"
       let check_rule_query = database.create(matched_message_query_string)
-      let check_rule_query_status = check_rule_query.count_messages_st(
-          addr message_matched_rule_count)
+      let check_rule_query_status = check_rule_query.count_messages_st(addr message_matched_rule_count)
       checkStatus(check_rule_query_status)
 
       case message_matched_rule_count:
         of 0:
           continue
         of 1:
+          debug("  matched to rule: " & filter.name & "!")
           let tagged_message_status = message.add_tag(filter.name)
           checkStatus(tagged_message_status)
 
           for mark, match_rules in pairs(mark_tags):
             if match_rules.contains(filter.name):
+              debug("  removing tag name: " & mark & "!")
               let remove_marked_tag_status = message.remove_tag(mark)
               checkStatus(remove_marked_tag_status)
         else:
-          echo(
-              "Found more than one message with the same identifier, aborting!!")
+          echo("Found more than one message with the same identifier, aborting!!")
           quit(QuitFailure)
   query.destroy()
 else:
