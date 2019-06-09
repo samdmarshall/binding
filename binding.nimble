@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.2.0"
+version       = "0.2.1"
 author        = "Samantha Marshall"
 description   = "simple tagging system for notmuch mail"
 license       = "BSD 3-Clause"
