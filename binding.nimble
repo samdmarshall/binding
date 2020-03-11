@@ -1,15 +1,16 @@
 # Package
 
-version       = "0.2.1"
+version       = "0.3.0"
 author        = "Samantha Marshall"
 description   = "simple tagging system for notmuch mail"
 license       = "BSD 3-Clause"
-srcDir        = "src"
+srcDir        = "src/"
 
-bin = @["binding"]
+bin    = @["binding"]
+binDir = "build/"
 
 # Dependencies
 
-requires "nim >= 0.16.0"
-requires "parsetoml >= 0.3.2"
-requires "notmuch >= 0.1.0"
+requires "nim >= 1.0"
+requires "parsetoml >= 0.5.0"
+requires "notmuch >= 5.2.0"
