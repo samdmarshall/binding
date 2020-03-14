@@ -20,7 +20,9 @@ import parsetoml
 # Static
 # ======
 
-const configuration_path = getConfigDir() / "binding" / "config.toml"
+const
+  NimblePkgVersion {.strdefine.} = ""
+  ConfigurationPath = getConfigDir() / "binding" / "config.toml"
 
 # =====
 # Types
@@ -37,7 +39,7 @@ type
   TagSelection = enum
     None,
     All,
-    New,
+    New
 
   TaggingRule = object
     name: string
@@ -57,7 +59,7 @@ type
     CcOR = "cc-or",
     CcAND = "cc-and",
     SubjectOR = "subject-or",
-    SubjectAND = "subject-and",
+    SubjectAND = "subject-and"
 
 # =========
 # Templates
@@ -68,7 +70,7 @@ template checkStatus(status: notmuch_status_t) =
   of NOTMUCH_STATUS_SUCCESS:
     discard
   else:
-    echo("Error: " & $status.to_string())
+    echo("Error: " & $status_to_string(status))
     quit(QuitFailure)
 
 # =========
@@ -76,10 +78,10 @@ template checkStatus(status: notmuch_status_t) =
 # =========
 
 proc progName(): string =
-  return getAppFilename().extractFilename()
+  result = getAppFilename().extractFilename()
 
 proc usage(cmd: CommandWord): string =
-  let starter = "usage: $#" % [ progName() ]
+  let starter = "usage: $#" % [progName()]
   case cmd
   of Noop:
     result &= fmt"{starter} [list|tag|version|usage|help] [-?|--usage] [-h|--help] [-v|--version] [--verbose]"
@@ -109,11 +111,9 @@ proc usage(cmd: CommandWord): string =
     result &= &"\n"
     result &= fmt"{starter} version [-?|--usage] [-h|--help]"
     result &= &"\n"
-  else:
-    discard
 
 proc versionInfo(): string =
-  result = progname() & " v0.2.1"
+  result = progname() & " v" & NimblePkgVersion
 
 proc `@`(rule: TaggingRule): string =
   result = ""
@@ -149,7 +149,7 @@ proc parsePathFromConfigValue(path: string): string =
   var path_value_normalized = path_value_tilde_expand.normalizedPath()
   let (dir, file) = path_value_normalized.splitPath()
   if len(dir) == 0:
-    let config_dir = parentDir(configuration_path)
+    let config_dir = parentDir(ConfigurationPath)
     result = config_dir / file
   else:
     result = path_value_normalized.expandFilename()
@@ -165,7 +165,7 @@ proc collectRules(filter: TomlTableRef, name: string): seq[TaggingRule] =
   var child_filters = newSeq[string]()
   for key, value in filter.pairs():
     let filter_name = composeFilterName(name, key)
-    debug("creating rule '" & filter_name & "'...") 
+    debug("creating rule '" & filter_name & "'...")
     case value.kind
     of TomlValueKind.Table:
       if len(name) > 0:
@@ -268,15 +268,15 @@ for kind, key, value in parser.getopt():
 
 addHandler(logger)
 
-if not configuration_path.fileExists():
-  fatal("unable to find a configuration file at '" & configuration_path & "'!")
+if not existsFile(ConfigurationPath):
+  fatal("unable to find a configuration file at '" & ConfigurationPath & "'!")
   quit(QuitFailure)
 
 if command == Tag and selection == None:
   fatal("No filter selection specified, please pass either `--all` or `--new`!")
   quit(QuitFailure)
 
-let configuration = parseFile(configuration_path).tableVal
+let configuration = parseFile(ConfigurationPath).tableVal
 
 if not configuration.hasKey("notmuch"):
   error("binding's configuration file must specify an section for the details about your notmuch setup!")
@@ -299,7 +299,8 @@ var notmuch_database_path: string
 if not notmuch_configuration_overrides.hasKey("database"):
   notmuch_database_path = notmuch_config.getSectionValue("database", "path")
 else:
-  notmuch_database_path = notmuch_configuration_overrides["database"]["path"].stringVal
+  notmuch_database_path = notmuch_configuration_overrides["database"][
+      "path"].stringVal
 
 var new_mail_tags: seq[string]
 
@@ -340,21 +341,36 @@ of List:
     info message
 
     var display = item.rule
-    display = display.replace(" or ", " $1or$2 "   % [ ansiStyleCode(styleBright), ansiResetCode])
-    display = display.replace(" and ", " $1and$2 " % [ ansiStyleCode(styleBright), ansiResetCode])
-    display = display.replace(" not ", " $1not$2 " % [ ansiStyleCode(styleBright), ansiResetCode])
-    display = display.replace("tag:", "$1tag:$2"   % [ ansiForegroundColorCode(fgRed, true), ansiResetCode])
-    display = display.replace("date:", "$1date:$2" % [ ansiForegroundColorCode(fgGreen, true), ansiResetCode])
-    display = display.replace("from:", "$1from:$2" % [ ansiForegroundColorCode(fgYellow, true), ansiResetCode])
-    display = display.replace("to:", "$1to:$2"     % [ ansiForegroundColorCode(fgBlue, true), ansiResetCode])
-    display = display.replace("cc:", "$1cc:$2"     % [ ansiForegroundColorCode(fgMagenta, true), ansiResetCode])
-    display = display.replace("subject:", "$1subject:$2" % [ ansiForegroundColorCode(fgCyan, true), ansiResetCode])
+    display = display.replace(" or ", " $1or$2 " % [ansiStyleCode(styleBright),
+        ansiResetCode])
+    display = display.replace(" and ", " $1and$2 " % [ansiStyleCode(
+        styleBright), ansiResetCode])
+    display = display.replace(" not ", " $1not$2 " % [ansiStyleCode(
+        styleBright), ansiResetCode])
+    display = display.replace("tag:", "$1tag:$2" % [ansiForegroundColorCode(
+        fgRed, true), ansiResetCode])
+    display = display.replace("date:", "$1date:$2" % [ansiForegroundColorCode(
+        fgGreen, true), ansiResetCode])
+    display = display.replace("from:", "$1from:$2" % [ansiForegroundColorCode(
+        fgYellow, true), ansiResetCode])
+    display = display.replace("to:", "$1to:$2" % [ansiForegroundColorCode(
+        fgBlue, true), ansiResetCode])
+    display = display.replace("cc:", "$1cc:$2" % [ansiForegroundColorCode(
+        fgMagenta, true), ansiResetCode])
+    display = display.replace("subject:", "$1subject:$2" % [
+        ansiForegroundColorCode(fgCyan, true), ansiResetCode])
+    display = display.replace("(", "$1($2" % [ansiStyleCode(
+        styleBright), ansiResetCode])
+    display = display.replace(")", "$1)$2" % [ansiStyleCode(
+        styleBright), ansiResetCode])
 
-    var name = "$#$#$#$#" % [ ansiStyleCode(styleBright), ansiStyleCode(styleUnderscore), item.name, ansiResetCode]
+    var name = "$#$#$#$#" % [ansiStyleCode(styleBright), ansiStyleCode(
+        styleUnderscore), item.name, ansiResetCode]
     echo name, ":\n  ", display
 
 of Tag:
-  let open_status = open(notmuch_database_path, NOTMUCH_DATABASE_MODE_READ_WRITE, addr database)
+  let open_status = open(notmuch_database_path,
+      NOTMUCH_DATABASE_MODE_READ_WRITE, addr database)
   checkStatus(open_status)
 
   case selection
@@ -364,7 +380,8 @@ of Tag:
       debug("finding mail matching rule: " & filter.name)
       let query_based_on_rule_text = database.create(filter.rule)
       var messages_matching_rule: notmuch_messages_t
-      let messages_matching_rule_status = query_based_on_rule_text.search_messages_st(addr messages_matching_rule)
+      let messages_matching_rule_status = query_based_on_rule_text.search_messages(
+          addr messages_matching_rule)
       checkStatus(messages_matching_rule_status)
 
       for message in messages_matching_rule.items():
@@ -384,7 +401,7 @@ of Tag:
     let query: notmuch_query_t = database.create(initial_query)
 
     var message_count: cuint
-    let count_messages_status = query.count_messages_st(addr message_count)
+    let count_messages_status = query.count_messages(addr message_count)
     checkStatus(count_messages_status)
     debug("Found " & $message_count & " messages matching rule...")
     if message_count == 0:
@@ -392,7 +409,7 @@ of Tag:
       quit(QuitSuccess)
 
     var messages: notmuch_messages_t
-    let query_status = query.search_messages_st(addr messages)
+    let query_status = query.search_messages(addr messages)
     checkStatus(query_status)
 
     for message in messages.items():
@@ -400,10 +417,13 @@ of Tag:
       debug("filtering message with id: " & $identifier & " ...")
       for filter in rules:
         var message_matched_rule_count: cuint = 0
-        let check_rule_query_string = filter.rule & " and " & "(" & initial_query & ")"
-        let matched_message_query_string = "id:" & $identifier & " and " & "(" & check_rule_query_string & ")"
+        let check_rule_query_string = filter.rule & " and " & "(" &
+            initial_query & ")"
+        let matched_message_query_string = "id:" & $identifier & " and " & "(" &
+            check_rule_query_string & ")"
         let check_rule_query = database.create(matched_message_query_string)
-        let check_rule_query_status = check_rule_query.count_messages_st(addr message_matched_rule_count)
+        let check_rule_query_status = check_rule_query.count_messages(
+            addr message_matched_rule_count)
         checkStatus(check_rule_query_status)
 
         case message_matched_rule_count
