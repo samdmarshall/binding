@@ -6,7 +6,7 @@
 import os
 
 import logger
-import models / [ constants ]
+import models / [constants]
 
 import notmuch
 
@@ -27,13 +27,3 @@ template checkStatus*(status: notmuch_status_t) =
 # Functions
 # =========
 
-#
-#
-proc expandPathRelativeToConfiguration*(path: string): string =
-  var path_value_tilde_expand = path.expandTilde()
-  var path_value_normalized = path_value_tilde_expand.normalizedPath()
-  let (dir, file) = path_value_normalized.splitPath()
-  if len(dir) == 0:
-    result = Configuration_Directory / file
-  else:
-    result = path_value_normalized.expandFilename()

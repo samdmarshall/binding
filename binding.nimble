@@ -4,10 +4,13 @@ version       = "0.3.0"
 author        = "Samantha Marshall"
 description   = "simple tagging system for notmuch mail"
 license       = "BSD 3-Clause"
+
 srcDir        = "src/"
 binDir        = "build/"
 bin           = @["binding"]
+
 installExt    = @["nim"]
+
 
 # Dependencies
 

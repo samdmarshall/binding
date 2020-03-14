@@ -3,7 +3,6 @@
 # Imports
 # =======
 
-import strtabs
 import sequtils
 import strutils
 

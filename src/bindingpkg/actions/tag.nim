@@ -3,17 +3,20 @@
 # Imports
 # =======
 
+import notmuch
+
 #import bindingpkg/logger
 import "../logger.nim"
+#import bindingpkg/models / [types]
+import "../models/types.nim"
 
 # =========
 # Functions
 # =========
 
-
 #
 #
-proc performTag*(tagAll: bool, tagNew: bool) =
+proc performTag*(config: Configuration, tagAll: bool, tagNew: bool) =
   let tagOnlyNewMail = (not tagAll)
   let undefinedTaggingBehavior = (not tagAll) and (not tagNew)
 

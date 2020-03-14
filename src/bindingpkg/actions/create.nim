@@ -1,10 +1,18 @@
 
+# =======
+# Imports
+# =======
+
+#import bindingpkg/logger
+import "../logger.nim"
+#import bindingpkg/models / [types]
+import "../models/types.nim"
+
 # =========
 # Functions
 # =========
 
-
 #
 #
-proc performCreate*(ruleName: string) =
+proc performCreate*(config: Configuration, ruleName: string) =
   discard

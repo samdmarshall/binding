@@ -1,4 +1,10 @@
 
+# =======
+# Imports
+# =======
+
+#import bindingpkg/logger
+import "../logger.nim"
 
 # =========
 # Functions

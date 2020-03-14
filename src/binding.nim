@@ -54,25 +54,29 @@ proc main() =
   let noCommandGiven = (not (isCommandSetup or isCommandCreate or isCommandDelete or isCommandList or isCommandShow or isCommandTag))
   let shouldBypassNormalStartup = (performingSetup or noCommandGiven)
 
+  var configuration: Configuration
+
   if shouldBypassNormalStartup:
     if performingSetup:
       notice("Bypassing normal startup process, reason: setup command specified.")
     if noCommandGiven:
       notice("Bypassing normal startup process, reason: no command specified.")
+  else:
+    configuration = parseConfiguration(sessionConfigurationPath)
 
   # Perform Subcommand Action
   if isCommandSetup:
     performSetup()
   if isCommandCreate:
-    performCreate(createRuleNamed)
+    performCreate(configuration, createRuleNamed)
   if isCommandDelete:
-    performDelete(deleteRuleNamed)
+    performDelete(configuration, deleteRuleNamed)
   if isCommandList:
-    performList(namePattern)
+    performList(configuration, namePattern)
   if isCommandShow:
-    performShow(showRuleNamed)
+    performShow(configuration, showRuleNamed)
   if isCommandTag:
-    performTag(tagAll, tagNew)
+    performTag(configuration, tagAll, tagNew)
 
 # ==========
 # Main Entry
